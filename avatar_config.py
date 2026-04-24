@@ -1,14 +1,13 @@
-# sana_config.py
+# avatar_config.py
 import core_seed
 
 DEFAULT_API_KEY = ""
 
-# 引入外部種子，達成複寫需求
-MODULES_FOR_UI = core_seed.MODULES_FOR_UI
-SYSTEM_PROMPT = core_seed.SYSTEM_PROMPT
+# 引入底層系統防禦與運作邏輯
+BASE_SYSTEM_RULES = core_seed.BASE_SYSTEM_RULES
 
 def get_forced_template(user_input):
-    """產生強制防偷懶的注入模板 (對應英文 VFO)"""
+    """產生強制防偷懶的注入模板，確保模型遵守 VFO 內部推演格式"""
     return f"""{user_input}
 
 【SYSTEM MANDATORY OVERRIDE】
