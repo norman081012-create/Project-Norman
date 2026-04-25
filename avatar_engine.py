@@ -80,6 +80,15 @@ def extract_vfo_dashboard(internal_text):
         match = re.search(pattern, plain_text, re.DOTALL | re.IGNORECASE)
         return match.group(1).strip() if match else "No Data"
 
+    # 抓取 Module B 原始文字 (範圍限定到 Step Two 或下一段落前)
+    mod_b_raw = extract(r"Module B[^\n:]*[:：]\s*(.*?)(?=\n\s*\[Step Two\]|\n\s*\[External|$)")
+    
+    # 🔥 強制清洗：如果 LLM 把圖靈測試的判定偷塞進了 Module B，把它刪掉，只保留純粹的戰略判斷
+    mod_b_clean = re.sub(r"\[?Exclusive System Protocol.*?\]?", "", mod_b_raw, flags=re.IGNORECASE | re.DOTALL)
+    mod_b_clean = re.sub(r"Intrusion Value.*?\n", "", mod_b_clean, flags=re.IGNORECASE)
+    mod_b_clean = re.sub(r"🚨 System Forced Override.*?\n", "", mod_b_clean, flags=re.IGNORECASE)
+    mod_b_clean = mod_b_clean.strip()
+
     data = {
         "l_val": extract(r"L=(.*?)(?=\n|\s*/|\s*T=)"),
         "t_val": extract(r"T=(.*?)(?=\n|\s*/|\s*SAI=)"),
@@ -87,9 +96,9 @@ def extract_vfo_dashboard(internal_text):
         "bd": extract(r"B-D=(.*?)(?=\n|\s*/|\s*MF=)"),
         "mf": extract(r"MF=(.*?)(?=\n|\s*/|\s*ATM=)"),
         "ai_scan": extract(r"Intrusion Value.*?(\d+)"),
-        "mod_b": extract(r"Module B[^\n:]*[:：]\s*(.*?)(?=\n.*\[Step Two\]|\n\n)"),
-        "mod_c": extract(r"Module C[^\n:]*[:：]\s*(.*?)(?=\n.*Module D)"),
-        "mod_d": extract(r"Module D[^\n:]*[:：]\s*(.*?)(?=\n.*\[VFO Harmonized)"),
+        "mod_b": mod_b_clean if mod_b_clean else "No Data",
+        "mod_c": extract(r"Module C[^\n:]*[:：]\s*(.*?)(?=\n\s*Module D|$)"),
+        "mod_d": extract(r"Module D[^\n:]*[:：]\s*(.*?)(?=\n\s*\[VFO Harmonized|$)"),
         "mod_a": extract(r"Module A[^\n:]*[:：]\s*(.*?)(?=\n|-|$)")
     }
     return data
