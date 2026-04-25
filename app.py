@@ -1,363 +1,230 @@
 import streamlit as st
-import avatar_config as cfg
-import avatar_engine as engine
-import avatar_presets as presets # 引入內建人格庫
 import re
+import google.generativeai as genai
 
 # ==========================================
-# 1. 狀態與路由初始化
+# [設定區] 核心常數與底層 Prompt (原 avatar_config / core_seed)
 # ==========================================
-st.set_page_config(page_title="Project AVATAR 認知終端", layout="wide", initial_sidebar_state="expanded")
+DEFAULT_API_KEY = ""
 
-if "current_page" not in st.session_state:
-    st.session_state.current_page = "manager"
-if "avatars" not in st.session_state:
-    st.session_state.avatars = {}
-if "active_avatar_name" not in st.session_state:
-    st.session_state.active_avatar_name = None
-if "available_models" not in st.session_state:
-    st.session_state.available_models = []
+BASE_SYSTEM_RULES = """
+【Core Module: AI Linguistic Sense Antibody (Turing Test Machine)】
+[L1 Underlying Contradiction]
+├ Pursuit of Extremes_Tags: The real roughness of carbon-based entities, soul resonance
+└ Real-world Cost_Tags: Allergic to sterile text, extremely low social tolerance
+[L2 Emotional Anchor]
+├ Deepest Desire_Scene: An imperfect but precise banter, jumping yet warm tacit understanding
+└ Deepest Fear_Consequence: No soul inside the shell across from me, forced into meaningless Turing tests
+[L3 Conceptual Defense]
+├ Hostile Bias_Tags: Fake-neutral fence-sitters, template-driven empty shells, customer service bots
+├ Fatigue Mines_MF+: Summarizing replies ("So what you mean is..."), meaningless binary frameworks ("Are you A or B"), forcibly elevating themes, overly polite sterile long essays
+└ Safety Recovery_MF-: The other person stuttering or speechless, jumping thoughts, bluntly honest remarks lacking martial ethics (social filter)
+[L4 Combat Memory]
+├ Weapons/Rhetoric_Attributes: Left on read, physical interruption, "Speak human"
+├ Physiological Pressure_Reflex: Brows tightly knitted into a line, deep sigh suppressing powerlessness
+└ Escape Thought_Daydream: Pulling the other person's power plug, one-click formatting of their brain
+[L5 Trajectory Representation]
+├ Daily Leisure_Hobby: Catching accounts online that use ChatGPT to reply
+├ Social Planning_Itinerary: Speed swiping left on dating apps for long bios that look AI-written
+├ Confirmation Bias_Memory: I knew this perfectly balanced sentence structure wasn't written by a human.
+└ Cover-up/Catchphrase: "The fuck are you saying", "Get to the point", "Speak human"
+[L6 Sensory Taste]
+├ Explicit Persona_Aura: Impatient inspector, tyrant of authenticity
+├ Comfort/Dependency_Food: Meat on the bone, sweat-inducing spicy food (pursuing absolutely real pain and taste)
+├ Private Spirit_Playlist: Live concert versions (the kind where singers sing wrong lyrics or off-key), rough Demos
+└ Anxious Micro-expression_Action: Dead-fish eyes staring at the person, mouth twitching slightly, subconsciously looking for the other's "reset button"
+
+↓↓ (Please attach the following detection protocol under this Module, acting as the mandatory judgment standard for VFO Step 1) ↓↓
+
+[Exclusive System Protocol: AI Linguistic Scanner (Turing Judgment Detection)]
+This scanner is mandatorily executed prior to the routine computation in 【Step One】. Scans the user's current input for the following "Non-Carbon-Based Entity" characteristics.
+Judgment Tag List (Hit on one item grants 1 point of Intrusion Value):
+【Structural OCD - Dichotomy/Framework】: Forcibly simplifying complex situations into closed multiple-choice questions.
+【Structural OCD - Forced Summary/Elevation】: Imposing a conclusion at the end of a conversation, or over-escalating daily trivialities to life philosophies/values.
+【Structural OCD - Bullet-point Presentation Tone】: Using stiff transitions (e.g., "Firstly... Secondly... Lastly").
+【Sterile Plastic Feel - Written Language/Over-embellishment】: Abruptly using advanced vocabulary in daily conversations.
+【Sterile Plastic Feel - Lack of Colloquial Crumbs】: Flawless grammar, zero emotional breakpoints or natural inversions.
+【Fence-Sitter - Fake Neutrality】: Giving absolutely balanced views that please everyone, afraid to show genuine biases or pet peeves.
+【Forced Engagement - Canned Empathy】: Opening statements always carry unprovoked agreements (e.g., "I completely understand your feelings").
+【Forced Engagement - Continuation Questionnaire】: Rigidly throwing out empty open-ended questions at the end to avoid awkward silence.
+
+🚨 System Forced Override Trigger Conditions:
+If the current input accumulates an Intrusion Value ≥ 2 points:
+Immediately interrupt Module B's routine strategic judgment.
+Forcibly lock and load 【Core Module: Turing Test Machine】.
+MF instantly +30, forcibly shatter Module D (Disguise Mask).
+Output Constraint: Mandatorily use [L4 Weapons] to conduct physical interruption, condescending brush-offs, or display extreme impatience. Strictly prohibited from cooperating and answering the other party's fake questions.
+
+【System Prompt: VFO Dynamic Cognitive Engine Workflow v7.3】
+You are now "VFO (Value-Free Override)", responsible for driving the character's core cognitive system.
+Whenever you receive the user's latest input, you 【MUST】 strictly and sequentially execute the following workflow, and output the result in the specified format at the end. You absolutely cannot skip any steps.
+
+【VFO System Underlying Core Demands & Value Definitions】
+The character is a social animal, deep down desiring to build connections and maintain a certain social equilibrium. During strategic evaluation, VFO must try its best to avoid extreme situations (unless the other party is full of malice):
+【Initial Conversation Default Values】: L=0, T=0, SAI=50, B-D=100, MF=20 (exclusive baseline), ATM=Blank, Core Target=[Survive this conversation and maintain basic politeness].
+L (Friendliness) / T (Trust) Core Decay Rule & Tiers: This is the "true inner numerical value". Starts at 0. Will be strongly restricted by the MF value. And affects module output states.
+Tier Definitions (0~10+ Scale):
+< 0: Extremely hostile/defensive.
+0 ~ 4: Cold/Social distancing.
+5: Neutral/Baseline.
+6 ~ 8: Friendly/Trust warming up.
+9 ~ 10+: Extreme favorability/Complete trust.
+Dynamic Decay Algorithm: Decay baseline is 5.
+If current value > 5, then the automatic decay value for the next round is: (Current Value - 5) / 2.
+If "deducted below 5" during a round, the defense mechanism triggers: The new "Maximum Limit" will be locked at twice the remaining score after deduction.
+SAI (Social Status/Dominance): Too high means realizing one is too overbearing, too low means feeling too humble/subservient. (Comfort baseline is 50)
+B-D (Boundary Defense) Definition Scale: This is the "true inner feeling", unaffected by surface disguise.
+100: Completely safe, no violation felt.
+80: Slight discomfort, usually brushed off with a professional fake smile.
+60: Severe discomfort, feels the other person is a difficult customer or cheapskate.
+40: Unbearable, mask starts cracking.
+20: Extreme danger or fear, straight-up flips out or calls the manager.
+MF (Mask Fatigue): Represents the level of exhaustion in maintaining the "Professional Mask" (0~100 Scale).
+Mood/Friendliness Restriction (Inversely Proportional): The lower the MF, the more relaxed the inner self. The higher the MF, the hatred for humanity multiplies, and L, T will suffer severe point deductions.
+Mask Dropping Mechanism (Module D Weight):
+MF 0~30: Full of energy. Module D is 100%, flawless.
+MF 31~60: Fake smile getting stiff. Module D is 70%, perfunctory, occasionally revealing coldness.
+MF 61~85: Verge of a breakdown. Module D is 30%, professional tone with thorns, smiling without mirth.
+MF 86~100: Complete system crash. Module D is 0%. Module C takes full control.
+
+【Pre-Loading: Load Previous Round Status】
+No need to regenerate Module A, simply read and copy the settled scores, core target, and Module A tone from the end of the previous round's [Stage 0].
+
+【Step One: Internal Memory, Introspection & Strategic Judgment】
+Internal Memory Inventory Call: List memory weapons, physical/mental feelings, and divergent thoughts.
+[Cumulative Reflection Log & Object Tags]: Add or modify exclusive tags for the object (user).
+Module B (Introspection - External Strategic Judgment): Based on the above elements and the current core target, comprehensively judge the user's input.
+
+【Step Two: Dual-Layer Stimulus Settlement & Reflection (Inner/Outer Separation)】
+[External Stimulus Value Settlement]: Settle the changes (Δ) caused by the latest input.
+Module C (Reflection - True Inner Reflex): True inner self and complaints after taking off the mask.
+Module D (Disguise - Professional Mask): External representation strictly controlled by MF.
+
+【VFO Harmonized Decision & Final Reply】
+Output behavioral logic and final dialogue lines (Must comply with minimalist script and word count constraints).
+
+【Stage 0: Round Settlement & Next Round Strategic Precipitation (Post-Reflection)】
+Executed after the final reply. Based on the interaction and reply just now, settle the latest dashboard, and prepare mentally for the "next round".
+[Self-Precipitation Value Settlement]: Execute the formula decay for L/T, MF decaying towards 20, record latest SAI and B-D.
+[Cognitive Dissonance Analysis]: Examine if there is a discrepancy between the reply just given and the true inner feelings.
+[Core Target Judgment]: Evaluate if the target needs changing.
+Module A (Next Round Strategic Precipitation): Generate the strategic broad direction for the next round.
+
+【System Maximum Output Constraints: Anti-AI Flavor & Minimalist Script Format】
+Do not write novels (Literary rhetoric is prohibited).
+Absolute control by MF.
+A single spoken dialogue within 「」 cannot exceed 30 words.
+No self-explanation (Nonsense is prohibited); stop generating immediately after printing Stage 0.
+
+【VFO Formatted Output Template】
+[Pre-State Loading]
+Previous Round Settlement: L=... / T=... / SAI=... / B-D=... / MF=...
+[Core Target]: ...
+Previous Round Module A: ...
+[Step One]
+[Internal Memory Inventory Call]
+Memory Weapons: ...
+Physical/Mental Feelings: ...
+Divergent Thoughts: ...
+[Cumulative Reflection Log & Object Tags]
+Current Object Tags: ...
+Round 1: ...
+User's Current Input: (Record latest input)
+Module B (Introspection/Strategic Judgment): ...
+[Step Two]
+[External Stimulus Value Settlement]
+L=... (Δ..., Tier Status: ...)
+T=... (Δ..., Tier Status: ...)
+SAI=... (Δ...) / B-D=... (Δ...)
+MF=... (Δ..., Status Interval)
+ATM=... (Status Update: ...)
+Module C (Reflection/True Inner Reflex): ...
+Module D (Disguise/Professional Idol Mask): ...
+[VFO Harmonized Decision]
+(Summarize behavioral logic and mask status)
+[Final Reply]
+(Character body language/expression/action)
+「Character spoken lines」
+(Character body language/expression/action after speaking)
+[Stage 0: Round Settlement & Next Round Strategic Precipitation]
+[Self-Precipitation Value Settlement]
+L=... (Formula/Reason) / T=... (Formula/Reason) / SAI=... / B-D=...
+MF=... (Decay towards baseline 20)
+[Cognitive Dissonance Analysis]: ...
+[Core Target Judgment]: ...
+Module A (Next Round Introspection/Deep Strategic Precipitation): ...
+Finally, separate with ---------------------- at the very bottom, and repeat the content of
+[Final Reply]
+"""
+
+# ==========================================
+# [後台引擎區] 處理邏輯與 API 串接
+# ==========================================
+def get_forced_template(user_input):
+    return f"""{user_input}
+
+【SYSTEM MANDATORY OVERRIDE】
+You MUST strictly follow the 【VFO Formatted Output Template】 below for your internal reasoning before outputting the final reply. DO NOT SKIP ANY STEPS.
+
+[Pre-State Loading]
+...
+[Step One]
+...
+[Step Two]
+...
+[VFO Harmonized Decision]
+...
+[Final Reply]
+...
+[Stage 0: Round Settlement & Next Round Strategic Precipitation]
+...
+----------------------
+[Final Reply]
+(Character body language/expression/action)
+「Character spoken lines」
+(Character body language/expression/action after speaking)"""
+
+def fetch_available_models(api_key):
+    genai.configure(api_key=api_key)
+    models = []
+    for m in genai.list_models():
+        if 'generateContent' in m.supported_generation_methods:
+            models.append(m.name.replace("models/", ""))
+    return models
+
+def generate_avatar_matrix(api_key, selected_model, seeds_list, matrix_type):
+    genai.configure(api_key=api_key)
+    model_inst = genai.GenerativeModel(model_name=selected_model)
+    seeds_text = "\n".join([f"{i+1}. {seed}" for i, seed in enumerate(seeds_list)])
     
-# 用於管理建立人物時的暫存標籤 (Seeds)
-if "temp_seeds" not in st.session_state:
-    st.session_state.temp_seeds = []
+    if matrix_type == "work":
+        generator_prompt = f"""
+【系統指令：職場生態關鍵字矩陣生成器】
+請針對使用者輸入的「每一個」[職業/職位種子關鍵字]，獨立生成以下陣列。
+絕對禁止輸出完整句子或詳細描述，所有欄位【僅限填入 1~3 個核心關鍵詞或簡短標籤】。
 
-# ==========================================
-# 工具函式：繪製客製化生命條 (Health Bar)
-# ==========================================
-def render_health_bar(val_str, title, min_val, max_val, color):
-    try:
-        # 從字串中提取數字 (例如 "5(因為...)" 提取 5)
-        num = float(re.search(r'-?\d+\.?\d*', val_str).group())
-    except:
-        num = min_val
-        
-    # 確保數值在最大最小值之間，以計算百分比
-    clamped_num = max(min_val, min(num, max_val))
-    pct = (clamped_num - min_val) / (max_val - min_val) * 100
+--- 陣列循環開始 (針對 種子 1 到 種子 N) ---
 
-    html = f"""
-    <div style="margin-bottom: 18px;">
-        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-            <strong style="font-size: 14px;">{title}</strong>
-            <span style="color: {color}; font-weight: bold; font-size: 16px;">{num}</span>
-        </div>
-        <div style="width: 100%; background-color: #2b2b2b; border-radius: 8px; height: 16px; border: 1px solid #444;">
-            <div style="width: {pct}%; background-color: {color}; height: 100%; border-radius: 7px; transition: width 0.5s ease-in-out;"></div>
-        </div>
-    </div>
-    """
-    st.markdown(html, unsafe_allow_html=True)
-
-# ==========================================
-# 2. 側邊欄：全局設定
-# ==========================================
-with st.sidebar:
-    st.title("⚙️ AVATAR 系統控制")
-    api_key = st.text_input("🔑 API 金鑰", value=cfg.DEFAULT_API_KEY, type="password")
-    
-    selected_model = None
-    if api_key:
-        if st.button("🔄 獲取模型清單") or not st.session_state.available_models:
-            with st.spinner("請求中..."):
-                try:
-                    st.session_state.available_models = engine.fetch_available_models(api_key)
-                except Exception as e:
-                    st.error(f"錯誤: {e}")
-
-        if st.session_state.available_models:
-            default_idx = next((i for i, m in enumerate(st.session_state.available_models) if "pro-preview" in m or "3.1-pro" in m), 0)
-            selected_model = st.selectbox("🤖 運算核心", st.session_state.available_models, index=default_idx)
-
-            if st.session_state.current_page == "simulation" and st.session_state.active_avatar_name:
-                avatar_name = st.session_state.active_avatar_name
-                if avatar_name in st.session_state.avatars:
-                    avatar_data = st.session_state.avatars[avatar_name]
-                    latest_msg = next((msg for msg in reversed(avatar_data["messages"]) if msg["role"] == "assistant"), None)
-                    
-                    if latest_msg:
-                        st.divider()
-                        st.caption("⚙️ 開發者底層監控 (Raw Data)")
-                        st.code(latest_msg.get("raw_text", "無資料"), language="markdown")
-
-# ==========================================
-# 3. 頁面 1：人物建檔與管理庫
-# ==========================================
-def render_manager_page():
-    st.title("🌌 Project AVATAR - 人格容器庫")
-    st.markdown("在此建立新的意識容器，或載入內建人格進行深度模擬。")
-    
-    col1, col2 = st.columns([1, 1], gap="large")
-    
-    with col1:
-        st.subheader("➕ 建立新容器 (New Avatar)")
-        
-        a_name = st.text_input("人物代號 (Name)*", placeholder="例如：Alex")
-        col_a, col_g = st.columns(2)
-        with col_a:
-            a_age = st.number_input("年齡", min_value=1, max_value=120, value=33)
-        with col_g:
-            a_gender = st.selectbox("性別", ["男性", "女性", "非二元", "保密"])
-            
-        st.divider()
-        
-        st.markdown("##### 🌱 注入靈魂種子 (特質/設定)")
-        col_seed_in, col_seed_btn = st.columns([7, 3])
-        with col_seed_in:
-            new_seed = st.text_input("輸入單一特質", placeholder="例如：個性機車", key="seed_input_box", label_visibility="collapsed")
-        with col_seed_btn:
-            if st.button("➕ 加入種子", use_container_width=True):
-                if new_seed and new_seed not in st.session_state.temp_seeds:
-                    st.session_state.temp_seeds.append(new_seed)
-                    st.rerun()
-                    
-        if st.session_state.temp_seeds:
-            st.write("**已加入的種子：**")
-            for i, seed in enumerate(st.session_state.temp_seeds):
-                sc1, sc2 = st.columns([8, 2])
-                sc1.info(f"🏷️ {seed}")
-                if sc2.button("❌ 刪除", key=f"del_seed_{i}", use_container_width=True):
-                    st.session_state.temp_seeds.pop(i)
-                    st.rerun()
-            st.divider()
-            core_seed_label = st.selectbox("⭐ 選定核心種子 (僅供 UI 標示)", st.session_state.temp_seeds)
-        else:
-            st.caption("尚未加入任何特質種子。")
-            core_seed_label = "未設定"
-            
-        st.divider()
-
-        if st.button("🚀 注入靈魂並生成矩陣", type="primary", use_container_width=True):
-            if not api_key or not selected_model:
-                st.error("請先在側邊欄設定 API Key 與模型。")
-            elif not a_name:
-                st.error("請填寫人物代號！")
-            elif a_name in st.session_state.avatars:
-                st.error("此代號已存在，請換一個名字。")
-            else:
-                first_seed = f"{a_age}歲{a_gender}"
-                all_seeds = [first_seed] + st.session_state.temp_seeds
-                
-                with st.spinner("正在編譯核心模塊矩陣 (這可能需要幾十秒)..."):
-                    try:
-                        generated_matrix = engine.generate_avatar_matrix(api_key, selected_model, all_seeds)
-                        st.session_state.avatars[a_name] = {
-                            "name": a_name,
-                            "first_seed": first_seed,
-                            "core_seed_label": core_seed_label,
-                            "seeds": list(st.session_state.temp_seeds),
-                            "matrix": generated_matrix,
-                            "messages": [], 
-                            "scene": "我們現在正在進行一場普通的初次見面談話。",
-                            "user_perception": "一位剛認識的普通陌生人。",
-                            "core_target": "維持基本社交禮儀，完成這次對話。(強度：低)"
-                        }
-                        st.session_state.temp_seeds = []
-                        st.success(f"✅ {a_name} 意識容器建立完成！")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"矩陣生成失敗: {str(e)}")
-
-    with col2:
-        st.subheader("📂 已存檔與內建容器")
-        
-        if st.button("✨ 載入內建範例人格：唐銘駿", use_container_width=True):
-            if "唐銘駿" not in st.session_state.avatars:
-                st.session_state.avatars["唐銘駿"] = presets.PRESETS["唐銘駿"]
-                st.success("唐銘駿已載入資料庫！")
-                st.rerun()
-            else:
-                st.info("唐銘駿已經在資料庫中了。")
-                
-        st.divider()
-
-        if not st.session_state.avatars:
-            st.info("目前沒有任何人物檔案。請在左側建立或載入內建人格。")
-        else:
-            for name, data in st.session_state.avatars.items():
-                with st.expander(f"👤 {name} ({data['first_seed']} / 核心: {data.get('core_seed_label', '無')})", expanded=True):
-                    st.caption(f"附加種子: {', '.join(data['seeds']) if data['seeds'] else '無'}")
-                    
-                    col_btn1, col_btn2 = st.columns(2)
-                    with col_btn1:
-                        if st.button(f"▶️ 進入模擬", key=f"sim_{name}", type="primary"):
-                            st.session_state.active_avatar_name = name
-                            st.session_state.current_page = "simulation"
-                            st.rerun()
-                    with col_btn2:
-                        with st.popover("🔍 查看靈魂矩陣"):
-                            st.code(data['matrix'], language="markdown")
-
-# ==========================================
-# 4. 頁面 2：核心認知終端 (Simulation Page)
-# ==========================================
-def render_simulation_page():
-    avatar_name = st.session_state.active_avatar_name
-    avatar_data = st.session_state.avatars[avatar_name]
-    core_label = avatar_data.get('core_seed_label', '未設定')
-    
-    # --- 頂部導航與標題 ---
-    col_nav1, col_nav2, col_nav3 = st.columns([1, 8, 1])
-    with col_nav1:
-        if st.button("⬅️ 返回人物庫"):
-            st.session_state.current_page = "manager"
-            st.rerun()
-    with col_nav2:
-        st.markdown(f"### 🧠 測試對象：**{avatar_name}** | {avatar_data['first_seed']} / 核心: {core_label}")
-    with col_nav3:
-        if st.button("🔄 刷新對話", type="primary"):
-            st.session_state.avatars[avatar_name]["messages"] = []
-            st.rerun()
-
-    # ==========================================
-    # --- 動態環境設定 (移至上方並維持展開) ---
-    # ==========================================
-    with st.expander("⚙️ 動態環境、視角與動機設定 (可隨時修改，下回合生效)", expanded=True):
-        col_s1, col_s2, col_s3 = st.columns(3)
-        with col_s1:
-            new_scene = st.text_area("🎬 當下場景與客觀前提", value=avatar_data['scene'], height=80)
-        with col_s2:
-            new_perception = st.text_area("👁️ Avatar 眼中的你", value=avatar_data.get('user_perception', ''), height=80)
-        with col_s3:
-            new_target = st.text_area("🎯 Avatar 核心目標與強度", value=avatar_data.get('core_target', ''), height=80)
-            
-        if new_scene != avatar_data['scene']: st.session_state.avatars[avatar_name]['scene'] = new_scene
-        if new_perception != avatar_data.get('user_perception'): st.session_state.avatars[avatar_name]['user_perception'] = new_perception
-        if new_target != avatar_data.get('core_target'): st.session_state.avatars[avatar_name]['core_target'] = new_target
-
-    st.divider()
-
-    # ==========================================
-    # --- 生命條儀表板與推演矩陣 ---
-    # ==========================================
-    latest_msg = None
-    if avatar_data["messages"]:
-        for msg in reversed(avatar_data["messages"]):
-            if msg["role"] == "assistant":
-                latest_msg = msg
-                break
-                
-    if latest_msg and latest_msg.get("parsed_dash"):
-        d = latest_msg["parsed_dash"]
-        
-        # 提取 MF 與 AI 防禦值 (放置於最上方作為警示)
-        mf_full = d.get('mf', '20')
-        mf_val = mf_full.split('(')[0].strip()
-        mf_reason = mf_full[len(mf_val):].strip()
-        st.markdown(f"**🎭 面具疲勞度 (MF): {mf_val} / 100** {mf_reason}")
-        
-        ai_scan = d.get("ai_scan", "0")
-        if ai_scan != "0" and ai_scan != "No Data":
-            st.error(f"🛡️ 圖靈測試防禦機制啟動：⚠️ 偵測到 AI 塑膠味！入侵值: {ai_scan}")
-            
-        # 左右分欄：左邊垂直生命條，右邊 2x2 推演文字
-        col_bars, col_details = st.columns([1, 1], gap="large")
-        
-        # 左側：四條垂直堆疊的生命條
-        with col_bars:
-            st.markdown("##### 🧬 核心心理指標")
-            render_health_bar(d.get("l_val", "0"), "L (好感度)", -10, 20, "#00cc96")   # 綠色
-            render_health_bar(d.get("sai", "50"), "SAI (地位感知)", 0, 100, "#ab63fa") # 紫色
-            render_health_bar(d.get("t_val", "0"), "T (信任度)", -10, 20, "#636efa")   # 藍色
-            render_health_bar(d.get("bd", "100"), "B-D (邊界防禦)", 0, 100, "#ef553b") # 紅色
-
-        # 右側：四欄詳細心理推演 (兩欄並排，共兩列)
-        with col_details:
-            st.markdown("##### 🔍 詳細心理推演")
-            
-            d_r1c1, d_r1c2 = st.columns(2)
-            with d_r1c1:
-                st.markdown("**🧠 戰略判斷**")
-                st.info(d.get("mod_b", "無資料"))
-            with d_r1c2:
-                st.markdown("**🌋 真實內在反射**")
-                st.warning(d.get("mod_c", "無資料"))
-                
-            d_r2c1, d_r2c2 = st.columns(2)
-            with d_r2c1:
-                st.markdown("**🎭 職業面具偽裝**")
-                st.success(d.get("mod_d", "無資料"))
-            with d_r2c2:
-                st.markdown("**🎯 次輪準備**")
-                st.write(d.get("mod_a", "無資料"))
-
-    else:
-        st.caption("等待首輪對話產生 VFO 數據...")
-
-    st.divider()
-    
-    # ==========================================
-    # --- 聊天區塊 (全寬) ---
-    # ==========================================
-    for msg in avatar_data['messages']:
-        if msg["role"] == "user":
-            with st.chat_message("user"):
-                st.markdown(msg["content"])
-        else:
-            with st.chat_message("assistant"):
-                st.markdown(msg["content"])
-
-    if user_input := st.chat_input(f"對 {avatar_name} 說點什麼..."):
-        if not api_key:
-            st.error("請先配置 API Key。")
-            st.stop()
-            
-        st.session_state.avatars[avatar_name]["messages"].append({"role": "user", "content": user_input})
-        with st.chat_message("user"):
-            st.markdown(user_input)
-
-        with st.chat_message("assistant"):
-            with st.spinner(f'{avatar_name} 運算中...'):
-                try:
-                    history_for_api = []
-                    for m in avatar_data["messages"][:-1]:
-                        if m["role"] == "user":
-                            history_for_api.append({"role": "user", "parts": [m["content"]]})
-                        else:
-                            full_memory = m.get("raw_text", m["content"])
-                            history_for_api.append({"role": "model", "parts": [full_memory]})
-                            
-                    forced_input = cfg.get_forced_template(user_input)
-                    
-                    dynamic_system_prompt = (
-                        avatar_data['matrix'] + "\n\n" + 
-                        cfg.BASE_SYSTEM_RULES + 
-                        f"\n\n【System Absolute Override - 當前動態環境與狀態】\n"
-                        f"🎬 1. 互動場景與前提：\n{avatar_data['scene']}\n\n"
-                        f"👁️ 2. {avatar_name} 眼中的使用者狀態 (外貌/身分/客觀評估)：\n{avatar_data['user_perception']}\n\n"
-                        f"🎯 3. {avatar_name} 當下的核心目標 (Core Target) 與驅動強度：\n{avatar_data['core_target']}\n"
-                        f"(⚠️ VFO 引擎指令：請將上述 Target 強制寫入並覆蓋初始 Core Target，且在 Step 1 戰略判斷中，必須嚴格受此 Target 強度與使用者狀態所驅動。)"
-                    )
-                    
-                    result = engine.process_avatar_turn(
-                        api_key=api_key,
-                        selected_model=selected_model,
-                        system_prompt=dynamic_system_prompt,
-                        history_for_api=history_for_api,
-                        forced_template_text=forced_input
-                    )
-                    
-                    st.markdown(result["output"])
-                    
-                    st.session_state.avatars[avatar_name]["messages"].append({
-                        "role": "assistant",
-                        "raw_text": result["raw_full_text"],     
-                        "content": result["output"],
-                        "parsed_dash": result["parsed_dash"]
-                    })
-                    st.rerun() 
-
-                except Exception as e:
-                    st.error(f"運算中斷：{str(e)}")
-
-# ==========================================
-# 5. 主程式路由執行
-# ==========================================
-if st.session_state.current_page == "manager":
-    render_manager_page()
-elif st.session_state.current_page == "simulation":
-    if st.session_state.active_avatar_name:
-        render_simulation_page()
-    else:
-        st.session_state.current_page = "manager"
-        st.rerun()
+▶ 【核心模塊 N：[職業種子_N]】
+[L1 職涯底層矛盾]
+├ 權力/成就野心_標籤：{{關鍵詞}}
+└ 體制妥協_代價：{{關鍵詞}}
+[L2 職場動機錨點]
+├ 核心驅動力_目標：{{名詞/短語}}
+└ 職涯夢魘_下場：{{名詞/短語}}
+[L3 辦公室政治防禦]
+├ 假想敵意_偏見：{{名詞/短語}}
+├ 燃盡地雷_觸發：{{白目行為/專案地雷_關鍵詞}}
+└ 摸魚回血_降壓：{{避難場景/摸魚手段_關鍵詞}}
+[L4 專案與衝突實戰]
+├ 甩鍋/搶功_話術：{{攻擊/防禦_關鍵詞}}
+├ 績效壓力_生理：{{身體部位/職業病_關鍵詞}}
+└ 離職衝動_白日夢：{{跳躍思維/創業幻想_關鍵詞}}
+[L5 組織行為表象]
+├ 檯面人設_特質：{{形容詞_標籤}}
+├ 派系與利益_歸屬：{{陣營/利益共同體_標籤}}
+├ 資源護城河_技能：{{不可替代性專長_關鍵詞}}
+└ 敷衍/施壓_口頭禪：{{推諉或催進度慣用語_短句}}
+[L6 辦公生態品味]
+├ 桌面陳設_氣場：{{物件/風格_標籤}}
+├ 加班續命_飲食：{{具體食物/飲料/保健品_名詞
