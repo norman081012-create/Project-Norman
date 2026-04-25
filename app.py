@@ -3,7 +3,6 @@ import avatar_config as cfg
 import avatar_engine as engine
 import avatar_presets as presets # 引入內建人格庫
 import re
-import plotly.graph_objects as go # 引入 Plotly 繪製儀表板指針
 
 # ==========================================
 # 1. 狀態與路由初始化
@@ -24,38 +23,31 @@ if "temp_seeds" not in st.session_state:
     st.session_state.temp_seeds = []
 
 # ==========================================
-# 工具函式：繪製真正的汽車指針儀表板
+# 工具函式：繪製客製化生命條 (Health Bar)
 # ==========================================
-def create_dash_gauge(val_str, title, min_val, max_val, color):
+def render_health_bar(val_str, title, min_val, max_val, color):
     try:
         # 從字串中提取數字 (例如 "5(因為...)" 提取 5)
         num = float(re.search(r'-?\d+\.?\d*', val_str).group())
     except:
-        num = 0
+        num = min_val
         
-    fig = go.Figure(go.Indicator(
-        mode = "gauge+number",
-        value = num,
-        title = {'text': title, 'font': {'size': 15}},
-        gauge = {
-            'axis': {'range': [min_val, max_val], 'tickwidth': 2},
-            'bar': {'color': color},
-            'bgcolor': "rgba(0,0,0,0)",
-            'borderwidth': 2,
-            'bordercolor': "gray",
-            'steps': [
-                {'range': [min_val, min_val + (max_val-min_val)*0.3], 'color': "rgba(255,255,255,0.1)"},
-            ]
-        }
-    ))
-    # 壓縮邊界以適應 2x2 排版
-    fig.update_layout(
-        height=180, 
-        margin=dict(l=15, r=15, t=35, b=10),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)"
-    )
-    return fig
+    # 確保數值在最大最小值之間，以計算百分比
+    clamped_num = max(min_val, min(num, max_val))
+    pct = (clamped_num - min_val) / (max_val - min_val) * 100
+
+    html = f"""
+    <div style="margin-bottom: 18px;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+            <strong style="font-size: 14px;">{title}</strong>
+            <span style="color: {color}; font-weight: bold; font-size: 16px;">{num}</span>
+        </div>
+        <div style="width: 100%; background-color: #2b2b2b; border-radius: 8px; height: 16px; border: 1px solid #444;">
+            <div style="width: {pct}%; background-color: {color}; height: 100%; border-radius: 7px; transition: width 0.5s ease-in-out;"></div>
+        </div>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
 
 # ==========================================
 # 2. 側邊欄：全局設定
@@ -236,7 +228,7 @@ def render_simulation_page():
     st.divider()
 
     # ==========================================
-    # --- 汽車儀表板與推演矩陣 ---
+    # --- 生命條儀表板與推演矩陣 ---
     # ==========================================
     latest_msg = None
     if avatar_data["messages"]:
@@ -258,24 +250,21 @@ def render_simulation_page():
         if ai_scan != "0" and ai_scan != "No Data":
             st.error(f"🛡️ 圖靈測試防禦機制啟動：⚠️ 偵測到 AI 塑膠味！入侵值: {ai_scan}")
             
-        # 左右分欄：左邊 2x2 汽車指針，右邊 2x2 推演文字
-        col_gauges, col_details = st.columns([1, 1], gap="large")
+        # 左右分欄：左邊垂直生命條，右邊 2x2 推演文字
+        col_bars, col_details = st.columns([1, 1], gap="large")
         
-        # 左側：四個指針圓餅
-        with col_gauges:
-            g_r1c1, g_r1c2 = st.columns(2)
-            with g_r1c1: st.plotly_chart(create_dash_gauge(d.get("l_val", "0"), "L (好感度)", -10, 20, "#00cc96"), use_container_width=True)
-            with g_r1c2: st.plotly_chart(create_dash_gauge(d.get("sai", "50"), "SAI (地位感知)", 0, 100, "#ab63fa"), use_container_width=True)
-            
-            g_r2c1, g_r2c2 = st.columns(2)
-            with g_r2c1: st.plotly_chart(create_dash_gauge(d.get("t_val", "0"), "T (信任度)", -10, 20, "#636efa"), use_container_width=True)
-            with g_r2c2: st.plotly_chart(create_dash_gauge(d.get("bd", "100"), "B-D (邊界防禦)", 0, 100, "#ef553b"), use_container_width=True)
+        # 左側：四條垂直堆疊的生命條
+        with col_bars:
+            st.markdown("##### 🧬 核心心理指標")
+            render_health_bar(d.get("l_val", "0"), "L (好感度)", -10, 20, "#00cc96")   # 綠色
+            render_health_bar(d.get("sai", "50"), "SAI (地位感知)", 0, 100, "#ab63fa") # 紫色
+            render_health_bar(d.get("t_val", "0"), "T (信任度)", -10, 20, "#636efa")   # 藍色
+            render_health_bar(d.get("bd", "100"), "B-D (邊界防禦)", 0, 100, "#ef553b") # 紅色
 
-        # 右側：四欄詳細心理推演 (兩欄並排，共兩列，精準對齊左側圓餅高度)
+        # 右側：四欄詳細心理推演 (兩欄並排，共兩列)
         with col_details:
             st.markdown("##### 🔍 詳細心理推演")
             
-            # 第一列 (對齊上方兩個指針)
             d_r1c1, d_r1c2 = st.columns(2)
             with d_r1c1:
                 st.markdown("**🧠 戰略判斷**")
@@ -284,7 +273,6 @@ def render_simulation_page():
                 st.markdown("**🌋 真實內在反射**")
                 st.warning(d.get("mod_c", "無資料"))
                 
-            # 第二列 (對齊下方兩個指針)
             d_r2c1, d_r2c2 = st.columns(2)
             with d_r2c1:
                 st.markdown("**🎭 職業面具偽裝**")
