@@ -1,4 +1,3 @@
-# avatar_config.py
 import core_seed
 
 DEFAULT_API_KEY = ""
