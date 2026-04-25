@@ -42,6 +42,18 @@ with st.sidebar:
             default_idx = next((i for i, m in enumerate(st.session_state.available_models) if "pro-preview" in m or "3.1-pro" in m), 0)
             selected_model = st.selectbox("🤖 運算核心", st.session_state.available_models, index=default_idx)
 
+            # 👇 新增：當處於對話測試頁面，且已有生成資料時，在側邊欄最下方顯示 Raw Data
+            if st.session_state.current_page == "simulation" and st.session_state.active_avatar_name:
+                avatar_name = st.session_state.active_avatar_name
+                if avatar_name in st.session_state.avatars:
+                    avatar_data = st.session_state.avatars[avatar_name]
+                    latest_msg = next((msg for msg in reversed(avatar_data["messages"]) if msg["role"] == "assistant"), None)
+                    
+                    if latest_msg:
+                        st.divider()
+                        st.caption("⚙️ 開發者底層監控 (Raw Data)")
+                        st.code(latest_msg.get("raw_text", "無資料"), language="markdown")
+
 # ==========================================
 # 3. 頁面 1：人物建檔與管理庫
 # ==========================================
@@ -85,7 +97,6 @@ def render_manager_page():
                     st.session_state.temp_seeds.pop(i)
                     st.rerun()
             st.divider()
-            # 👇 新增：選擇核心種子
             core_seed_label = st.selectbox("⭐ 選定核心種子 (僅供 UI 標示)", st.session_state.temp_seeds)
         else:
             st.caption("尚未加入任何特質種子。")
@@ -111,7 +122,7 @@ def render_manager_page():
                         st.session_state.avatars[a_name] = {
                             "name": a_name,
                             "first_seed": first_seed,
-                            "core_seed_label": core_seed_label, # 存入核心標籤
+                            "core_seed_label": core_seed_label,
                             "seeds": list(st.session_state.temp_seeds),
                             "matrix": generated_matrix,
                             "messages": [], 
@@ -119,7 +130,6 @@ def render_manager_page():
                             "user_perception": "一位剛認識的普通陌生人。",
                             "core_target": "維持基本社交禮儀，完成這次對話。(強度：低)"
                         }
-                        # 清空暫存
                         st.session_state.temp_seeds = []
                         st.success(f"✅ {a_name} 意識容器建立完成！")
                         st.rerun()
@@ -129,7 +139,6 @@ def render_manager_page():
     with col2:
         st.subheader("📂 已存檔與內建容器")
         
-        # 載入內建按鈕
         if st.button("✨ 載入內建範例人格：唐銘駿", use_container_width=True):
             if "唐銘駿" not in st.session_state.avatars:
                 st.session_state.avatars["唐銘駿"] = presets.PRESETS["唐銘駿"]
@@ -163,7 +172,7 @@ def render_manager_page():
 def render_simulation_page():
     avatar_name = st.session_state.active_avatar_name
     avatar_data = st.session_state.avatars[avatar_name]
-    core_label = avatar_data.get('core_seed_label', '未設定') # 讀取核心標籤
+    core_label = avatar_data.get('core_seed_label', '未設定')
     
     # --- 頂部導航與標題 ---
     col_nav1, col_nav2, col_nav3 = st.columns([1, 8, 1])
@@ -172,10 +181,8 @@ def render_simulation_page():
             st.session_state.current_page = "manager"
             st.rerun()
     with col_nav2:
-        # 修改後的標題格式
         st.markdown(f"### 🧠 測試對象：**{avatar_name}** | {avatar_data['first_seed']} / 核心: {core_label}")
     with col_nav3:
-        # 新增刷新對話按鈕
         if st.button("🔄 刷新對話", type="primary"):
             st.session_state.avatars[avatar_name]["messages"] = []
             st.rerun()
@@ -206,36 +213,40 @@ def render_simulation_page():
         with col_m4:
             st.metric("B-D (邊界防禦)", d.get("bd", "100").split('(')[0].strip())
         with col_m5:
-            # 處理 MF，將純數字與後方的原因切開
             mf_full = d.get('mf', '20')
             mf_val = mf_full.split('(')[0].strip()
             st.metric("MF (面具疲勞)", mf_val)
 
         # 2. 面具疲勞度詳細解析 & 圖靈防禦機制
-        mf_reason = mf_full[len(mf_val):].strip() # 擷取包括括號在內的增減與狀態
+        mf_reason = mf_full[len(mf_val):].strip()
         st.markdown(f"**🎭 面具疲勞度 (MF): {mf_val} / 100** {mf_reason}")
         
         ai_scan = d.get("ai_scan", "0")
         if ai_scan != "0" and ai_scan != "No Data":
             st.error(f"🛡️ 圖靈測試防禦機制啟動：⚠️ 偵測到 AI 塑膠味！入侵值: {ai_scan}")
             
-        # 3. 將文字較多的模組收納進 Expander 以免佔用主畫面高度
-        with st.expander("🔍 展開詳細心理模組推演", expanded=False):
-            st.markdown("**🧠 模組 B: 戰略判斷 (Introspection)**")
+        st.markdown("---")
+            
+        # 3. 將文字較多的模組直接展開為四格並移除贅字
+        st.markdown("##### 🔍 詳細心理推演")
+        col_mod1, col_mod2, col_mod3, col_mod4 = st.columns(4)
+        
+        with col_mod1:
+            st.markdown("**🧠 戰略判斷 (Introspection)**")
             st.info(d.get("mod_b", "無資料"))
             
-            st.markdown("**🌋 模組 C: 真實內在反射 (True Inner Reflex)**")
+        with col_mod2:
+            st.markdown("**🌋 真實內在反射 (True Inner Reflex)**")
             st.warning(d.get("mod_c", "無資料"))
             
-            st.markdown("**🎭 模組 D: 職業面具偽裝 (Professional Mask)**")
+        with col_mod3:
+            st.markdown("**🎭 職業面具偽裝 (Professional Mask)**")
             st.success(d.get("mod_d", "無資料"))
             
-            st.markdown("**🎯 模組 A: 次輪準備 (Next Round Prep)**")
+        with col_mod4:
+            st.markdown("**🎯 次輪準備 (Next Round Prep)**")
             st.write(d.get("mod_a", "無資料"))
-            
-            st.divider()
-            st.caption("⚙️ 開發者底層監控 (Raw Data)")
-            st.code(latest_msg.get("raw_text", "無資料"), language="markdown")
+
     else:
         st.caption("等待首輪對話產生 VFO 數據...")
 
@@ -247,20 +258,18 @@ def render_simulation_page():
     with st.expander("⚙️ 動態環境、視角與動機設定 (可隨時修改，下回合生效)", expanded=False):
         col_s1, col_s2, col_s3 = st.columns(3)
         with col_s1:
-            new_scene = st.text_area("🎬 當下場景與客觀前提", value=avatar_data['scene'], height=100, help="你們在哪裡？正在發生什麼事？")
+            new_scene = st.text_area("🎬 當下場景與客觀前提", value=avatar_data['scene'], height=100)
         with col_s2:
-            new_perception = st.text_area("👁️ Avatar 眼中的你 (狀態/外貌/身分)", value=avatar_data.get('user_perception', ''), height=100, help="Avatar 目前認定你是什麼身分？")
+            new_perception = st.text_area("👁️ Avatar 眼中的你 (狀態/外貌/身分)", value=avatar_data.get('user_perception', ''), height=100)
         with col_s3:
-            new_target = st.text_area("🎯 Avatar 初始/核心目標與強度", value=avatar_data.get('core_target', ''), height=100, help="Avatar 當下最想達成的目的是什麼？")
+            new_target = st.text_area("🎯 Avatar 初始/核心目標與強度", value=avatar_data.get('core_target', ''), height=100)
             
-        # 即時儲存設定
         if new_scene != avatar_data['scene']: st.session_state.avatars[avatar_name]['scene'] = new_scene
         if new_perception != avatar_data.get('user_perception'): st.session_state.avatars[avatar_name]['user_perception'] = new_perception
         if new_target != avatar_data.get('core_target'): st.session_state.avatars[avatar_name]['core_target'] = new_target
 
     st.divider()
 
-    # 渲染對話紀錄
     for msg in avatar_data['messages']:
         if msg["role"] == "user":
             with st.chat_message("user"):
@@ -269,7 +278,6 @@ def render_simulation_page():
             with st.chat_message("assistant"):
                 st.markdown(msg["content"])
 
-    # 使用者輸入與運算邏輯
     if user_input := st.chat_input(f"對 {avatar_name} 說點什麼..."):
         if not api_key:
             st.error("請先配置 API Key。")
