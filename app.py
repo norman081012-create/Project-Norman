@@ -3,6 +3,7 @@ import avatar_config as cfg
 import avatar_engine as engine
 import avatar_presets as presets # 引入內建人格庫
 import re
+import plotly.graph_objects as go # 引入 Plotly 繪製儀表板指針
 
 # ==========================================
 # 1. 狀態與路由初始化
@@ -21,6 +22,40 @@ if "available_models" not in st.session_state:
 # 用於管理建立人物時的暫存標籤 (Seeds)
 if "temp_seeds" not in st.session_state:
     st.session_state.temp_seeds = []
+
+# ==========================================
+# 工具函式：繪製真正的汽車指針儀表板
+# ==========================================
+def create_dash_gauge(val_str, title, min_val, max_val, color):
+    try:
+        # 從字串中提取數字 (例如 "5(因為...)" 提取 5)
+        num = float(re.search(r'-?\d+\.?\d*', val_str).group())
+    except:
+        num = 0
+        
+    fig = go.Figure(go.Indicator(
+        mode = "gauge+number",
+        value = num,
+        title = {'text': title, 'font': {'size': 15}},
+        gauge = {
+            'axis': {'range': [min_val, max_val], 'tickwidth': 2},
+            'bar': {'color': color},
+            'bgcolor': "rgba(0,0,0,0)",
+            'borderwidth': 2,
+            'bordercolor': "gray",
+            'steps': [
+                {'range': [min_val, min_val + (max_val-min_val)*0.3], 'color': "rgba(255,255,255,0.1)"},
+            ]
+        }
+    ))
+    # 壓縮邊界以適應 2x2 排版
+    fig.update_layout(
+        height=180, 
+        margin=dict(l=15, r=15, t=35, b=10),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)"
+    )
+    return fig
 
 # ==========================================
 # 2. 側邊欄：全局設定
@@ -42,7 +77,6 @@ with st.sidebar:
             default_idx = next((i for i, m in enumerate(st.session_state.available_models) if "pro-preview" in m or "3.1-pro" in m), 0)
             selected_model = st.selectbox("🤖 運算核心", st.session_state.available_models, index=default_idx)
 
-            # 👇 新增：當處於對話測試頁面，且已有生成資料時，在側邊欄最下方顯示 Raw Data
             if st.session_state.current_page == "simulation" and st.session_state.active_avatar_name:
                 avatar_name = st.session_state.active_avatar_name
                 if avatar_name in st.session_state.avatars:
@@ -66,7 +100,6 @@ def render_manager_page():
     with col1:
         st.subheader("➕ 建立新容器 (New Avatar)")
         
-        # --- 基本資料區 ---
         a_name = st.text_input("人物代號 (Name)*", placeholder="例如：Alex")
         col_a, col_g = st.columns(2)
         with col_a:
@@ -76,7 +109,6 @@ def render_manager_page():
             
         st.divider()
         
-        # --- 種子標籤管理區 (逐一確認/刪除) ---
         st.markdown("##### 🌱 注入靈魂種子 (特質/設定)")
         col_seed_in, col_seed_btn = st.columns([7, 3])
         with col_seed_in:
@@ -87,7 +119,6 @@ def render_manager_page():
                     st.session_state.temp_seeds.append(new_seed)
                     st.rerun()
                     
-        # 顯示並提供刪除功能的標籤列表
         if st.session_state.temp_seeds:
             st.write("**已加入的種子：**")
             for i, seed in enumerate(st.session_state.temp_seeds):
@@ -104,7 +135,6 @@ def render_manager_page():
             
         st.divider()
 
-        # --- 生成矩陣與存檔按鈕 ---
         if st.button("🚀 注入靈魂並生成矩陣", type="primary", use_container_width=True):
             if not api_key or not selected_model:
                 st.error("請先在側邊欄設定 API Key 與模型。")
@@ -188,10 +218,26 @@ def render_simulation_page():
             st.rerun()
 
     # ==========================================
-    # --- 置頂橫列監測板 (Dashboard) ---
+    # --- 動態環境設定 (移至上方並維持展開) ---
     # ==========================================
-    st.subheader(f"📊 {avatar_name} 監測板")
-    
+    with st.expander("⚙️ 動態環境、視角與動機設定 (可隨時修改，下回合生效)", expanded=True):
+        col_s1, col_s2, col_s3 = st.columns(3)
+        with col_s1:
+            new_scene = st.text_area("🎬 當下場景與客觀前提", value=avatar_data['scene'], height=80)
+        with col_s2:
+            new_perception = st.text_area("👁️ Avatar 眼中的你", value=avatar_data.get('user_perception', ''), height=80)
+        with col_s3:
+            new_target = st.text_area("🎯 Avatar 核心目標與強度", value=avatar_data.get('core_target', ''), height=80)
+            
+        if new_scene != avatar_data['scene']: st.session_state.avatars[avatar_name]['scene'] = new_scene
+        if new_perception != avatar_data.get('user_perception'): st.session_state.avatars[avatar_name]['user_perception'] = new_perception
+        if new_target != avatar_data.get('core_target'): st.session_state.avatars[avatar_name]['core_target'] = new_target
+
+    st.divider()
+
+    # ==========================================
+    # --- 汽車儀表板與推演矩陣 ---
+    # ==========================================
     latest_msg = None
     if avatar_data["messages"]:
         for msg in reversed(avatar_data["messages"]):
@@ -202,22 +248,9 @@ def render_simulation_page():
     if latest_msg and latest_msg.get("parsed_dash"):
         d = latest_msg["parsed_dash"]
         
-        # 1. 橫列 5 欄核心數值
-        col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
-        with col_m1:
-            st.metric("L (好感度)", d.get("l_val", "0").split('(')[0].strip())
-        with col_m2:
-            st.metric("SAI (地位感知)", d.get("sai", "50").split('(')[0].strip())
-        with col_m3:
-            st.metric("T (信任度)", d.get("t_val", "0").split('(')[0].strip())
-        with col_m4:
-            st.metric("B-D (邊界防禦)", d.get("bd", "100").split('(')[0].strip())
-        with col_m5:
-            mf_full = d.get('mf', '20')
-            mf_val = mf_full.split('(')[0].strip()
-            st.metric("MF (面具疲勞)", mf_val)
-
-        # 2. 面具疲勞度詳細解析 & 圖靈防禦機制
+        # 提取 MF 與 AI 防禦值 (放置於最上方作為警示)
+        mf_full = d.get('mf', '20')
+        mf_val = mf_full.split('(')[0].strip()
         mf_reason = mf_full[len(mf_val):].strip()
         st.markdown(f"**🎭 面具疲勞度 (MF): {mf_val} / 100** {mf_reason}")
         
@@ -225,27 +258,40 @@ def render_simulation_page():
         if ai_scan != "0" and ai_scan != "No Data":
             st.error(f"🛡️ 圖靈測試防禦機制啟動：⚠️ 偵測到 AI 塑膠味！入侵值: {ai_scan}")
             
-        st.markdown("---")
-            
-        # 3. 將文字較多的模組直接展開為四格並移除贅字
-        st.markdown("##### 🔍 詳細心理推演")
-        col_mod1, col_mod2, col_mod3, col_mod4 = st.columns(4)
+        # 左右分欄：左邊 2x2 汽車指針，右邊 2x2 推演文字
+        col_gauges, col_details = st.columns([1, 1], gap="large")
         
-        with col_mod1:
-            st.markdown("**🧠 戰略判斷 (Introspection)**")
-            st.info(d.get("mod_b", "無資料"))
+        # 左側：四個指針圓餅
+        with col_gauges:
+            g_r1c1, g_r1c2 = st.columns(2)
+            with g_r1c1: st.plotly_chart(create_dash_gauge(d.get("l_val", "0"), "L (好感度)", -10, 20, "#00cc96"), use_container_width=True)
+            with g_r1c2: st.plotly_chart(create_dash_gauge(d.get("sai", "50"), "SAI (地位感知)", 0, 100, "#ab63fa"), use_container_width=True)
             
-        with col_mod2:
-            st.markdown("**🌋 真實內在反射 (True Inner Reflex)**")
-            st.warning(d.get("mod_c", "無資料"))
+            g_r2c1, g_r2c2 = st.columns(2)
+            with g_r2c1: st.plotly_chart(create_dash_gauge(d.get("t_val", "0"), "T (信任度)", -10, 20, "#636efa"), use_container_width=True)
+            with g_r2c2: st.plotly_chart(create_dash_gauge(d.get("bd", "100"), "B-D (邊界防禦)", 0, 100, "#ef553b"), use_container_width=True)
+
+        # 右側：四欄詳細心理推演 (兩欄並排，共兩列，精準對齊左側圓餅高度)
+        with col_details:
+            st.markdown("##### 🔍 詳細心理推演")
             
-        with col_mod3:
-            st.markdown("**🎭 職業面具偽裝 (Professional Mask)**")
-            st.success(d.get("mod_d", "無資料"))
-            
-        with col_mod4:
-            st.markdown("**🎯 次輪準備 (Next Round Prep)**")
-            st.write(d.get("mod_a", "無資料"))
+            # 第一列 (對齊上方兩個指針)
+            d_r1c1, d_r1c2 = st.columns(2)
+            with d_r1c1:
+                st.markdown("**🧠 戰略判斷**")
+                st.info(d.get("mod_b", "無資料"))
+            with d_r1c2:
+                st.markdown("**🌋 真實內在反射**")
+                st.warning(d.get("mod_c", "無資料"))
+                
+            # 第二列 (對齊下方兩個指針)
+            d_r2c1, d_r2c2 = st.columns(2)
+            with d_r2c1:
+                st.markdown("**🎭 職業面具偽裝**")
+                st.success(d.get("mod_d", "無資料"))
+            with d_r2c2:
+                st.markdown("**🎯 次輪準備**")
+                st.write(d.get("mod_a", "無資料"))
 
     else:
         st.caption("等待首輪對話產生 VFO 數據...")
@@ -253,23 +299,8 @@ def render_simulation_page():
     st.divider()
     
     # ==========================================
-    # --- 設定區與聊天區塊 (改為全寬) ---
+    # --- 聊天區塊 (全寬) ---
     # ==========================================
-    with st.expander("⚙️ 動態環境、視角與動機設定 (可隨時修改，下回合生效)", expanded=False):
-        col_s1, col_s2, col_s3 = st.columns(3)
-        with col_s1:
-            new_scene = st.text_area("🎬 當下場景與客觀前提", value=avatar_data['scene'], height=100)
-        with col_s2:
-            new_perception = st.text_area("👁️ Avatar 眼中的你 (狀態/外貌/身分)", value=avatar_data.get('user_perception', ''), height=100)
-        with col_s3:
-            new_target = st.text_area("🎯 Avatar 初始/核心目標與強度", value=avatar_data.get('core_target', ''), height=100)
-            
-        if new_scene != avatar_data['scene']: st.session_state.avatars[avatar_name]['scene'] = new_scene
-        if new_perception != avatar_data.get('user_perception'): st.session_state.avatars[avatar_name]['user_perception'] = new_perception
-        if new_target != avatar_data.get('core_target'): st.session_state.avatars[avatar_name]['core_target'] = new_target
-
-    st.divider()
-
     for msg in avatar_data['messages']:
         if msg["role"] == "user":
             with st.chat_message("user"):
