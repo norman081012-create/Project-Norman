@@ -1,363 +1,141 @@
-import streamlit as st
-import avatar_config as cfg
-import avatar_engine as engine
-import avatar_presets as presets # 引入內建人格庫
 import re
+import google.generativeai as genai
 
-# ==========================================
-# 1. 狀態與路由初始化
-# ==========================================
-st.set_page_config(page_title="Project AVATAR 認知終端", layout="wide", initial_sidebar_state="expanded")
+def fetch_available_models(api_key):
+    genai.configure(api_key=api_key)
+    models = []
+    for m in genai.list_models():
+        if 'generateContent' in m.supported_generation_methods:
+            clean_name = m.name.replace("models/", "")
+            models.append(clean_name)
+    return models
 
-if "current_page" not in st.session_state:
-    st.session_state.current_page = "manager"
-if "avatars" not in st.session_state:
-    st.session_state.avatars = {}
-if "active_avatar_name" not in st.session_state:
-    st.session_state.active_avatar_name = None
-if "available_models" not in st.session_state:
-    st.session_state.available_models = []
+def generate_avatar_matrix(api_key, selected_model, seeds_list):
+    """根據使用者輸入的種子，呼叫 LLM 自動生成核心靈魂矩陣"""
+    genai.configure(api_key=api_key)
+    model_inst = genai.GenerativeModel(model_name=selected_model)
     
-# 用於管理建立人物時的暫存標籤 (Seeds)
-if "temp_seeds" not in st.session_state:
-    st.session_state.temp_seeds = []
-
-# ==========================================
-# 工具函式：繪製客製化生命條 (Health Bar)
-# ==========================================
-def render_health_bar(val_str, title, min_val, max_val, color):
-    try:
-        # 從字串中提取數字 (例如 "5(因為...)" 提取 5)
-        num = float(re.search(r'-?\d+\.?\d*', val_str).group())
-    except:
-        num = min_val
-        
-    # 確保數值在最大最小值之間，以計算百分比
-    clamped_num = max(min_val, min(num, max_val))
-    pct = (clamped_num - min_val) / (max_val - min_val) * 100
-
-    html = f"""
-    <div style="margin-bottom: 18px;">
-        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-            <strong style="font-size: 14px;">{title}</strong>
-            <span style="color: {color}; font-weight: bold; font-size: 16px;">{num}</span>
-        </div>
-        <div style="width: 100%; background-color: #2b2b2b; border-radius: 8px; height: 16px; border: 1px solid #444;">
-            <div style="width: {pct}%; background-color: {color}; height: 100%; border-radius: 7px; transition: width 0.5s ease-in-out;"></div>
-        </div>
-    </div>
-    """
-    st.markdown(html, unsafe_allow_html=True)
-
-# ==========================================
-# 2. 側邊欄：全局設定
-# ==========================================
-with st.sidebar:
-    st.title("⚙️ AVATAR 系統控制")
-    api_key = st.text_input("🔑 API 金鑰", value=cfg.DEFAULT_API_KEY, type="password")
+    seeds_text = "\n".join([f"{i+1}. {seed}" for i, seed in enumerate(seeds_list)])
     
-    selected_model = None
-    if api_key:
-        if st.button("🔄 獲取模型清單") or not st.session_state.available_models:
-            with st.spinner("請求中..."):
-                try:
-                    st.session_state.available_models = engine.fetch_available_models(api_key)
-                except Exception as e:
-                    st.error(f"錯誤: {e}")
+    generator_prompt = f"""
+【系統指令：多核靈魂關鍵字矩陣生成器】
+請針對使用者輸入的「每一個」[種子關鍵字]，獨立生成以下陣列。
+絕對禁止輸出完整句子或詳細描述，所有欄位【僅限填入 1~3 個核心關鍵詞或簡短標籤】。
 
-        if st.session_state.available_models:
-            default_idx = next((i for i, m in enumerate(st.session_state.available_models) if "pro-preview" in m or "3.1-pro" in m), 0)
-            selected_model = st.selectbox("🤖 運算核心", st.session_state.available_models, index=default_idx)
+--- 陣列循環開始 (針對 種子 1 到 種子 N) ---
 
-            if st.session_state.current_page == "simulation" and st.session_state.active_avatar_name:
-                avatar_name = st.session_state.active_avatar_name
-                if avatar_name in st.session_state.avatars:
-                    avatar_data = st.session_state.avatars[avatar_name]
-                    latest_msg = next((msg for msg in reversed(avatar_data["messages"]) if msg["role"] == "assistant"), None)
-                    
-                    if latest_msg:
-                        st.divider()
-                        st.caption("⚙️ 開發者底層監控 (Raw Data)")
-                        st.code(latest_msg.get("raw_text", "無資料"), language="markdown")
+▶ 【核心模塊 N：[種子關鍵字_N]】
 
-# ==========================================
-# 3. 頁面 1：人物建檔與管理庫
-# ==========================================
-def render_manager_page():
-    st.title("🌌 Project AVATAR - 人格容器庫")
-    st.markdown("在此建立新的意識容器，或載入內建人格進行深度模擬。")
+[L1 底層矛盾]
+├ 追求極致_標籤：{{關鍵詞}}
+└ 現實代價_標籤：{{關鍵詞}}
+
+[L2 情緒錨點]
+├ 最深渴望_場景：{{名詞/短語}}
+└ 最深恐懼_下場：{{名詞/短語}}
+
+[L3 觀念防禦]
+├ 敵意偏見_標籤：{{名詞/短語}}
+├ 疲勞地雷_MF+：{{觸發動作_關鍵詞}}
+└ 安全回血_MF-：{{降壓情境_關鍵詞}}
+
+[L4 實戰內存]
+├ 武器/話術_屬性：{{攻擊/防禦_關鍵詞}}
+├ 生理壓力_反射：{{身體部位/痛覺_關鍵詞}}
+└ 逃避念頭_白日夢：{{跳躍思維_關鍵詞}}
+
+[L5 軌跡表象]
+├ 日常休閒_嗜好：{{行為_名詞}}
+├ 社會規劃_行程：{{待辦_關鍵詞}}
+├ 印證偏見_記憶：{{歷史事件_標籤}}
+└ 掩飾發洩_口頭禪：{{慣用語_短句}}
+
+[L6 感官品味]
+├ 外顯人設_氣場：{{形容詞_標籤}}
+├ 慰藉依賴_飲食：{{具體食物/飲料_名詞}}
+├ 私密精神_歌單：{{音樂/影視風格_標籤}}
+└ 焦慮微表情_動作：{{無意識動詞_短語}}
+
+--- 陣列循環結束 ---
+
+▶ 【VFO 跨模塊調和指令 (供即時演繹使用)】
+在對話生成時，VFO 需自動檢索上述 N 個模塊的標籤陣列。
+當面臨情境時，允許跨種子調用（例如：使用 [種子1] 的外顯人設，掩飾 [種子2] 的生理壓力；或當 [種子3] 的疲勞地雷被踩中時，觸發 [種子1] 的武器話術）。
+
+=====================================
+現在，請為以下種子生成完整矩陣格式：
+{seeds_text}
+"""
+    response = model_inst.generate_content(generator_prompt)
+    return response.text
+
+def extract_vfo_dashboard(internal_text):
+    """解析 VFO 運算過程中的各項心理數值"""
+    if not internal_text:
+        return {}
+        
+    plain_text = internal_text.replace('**', '').replace('* ', '')
     
-    col1, col2 = st.columns([1, 1], gap="large")
+    def extract(pattern):
+        match = re.search(pattern, plain_text, re.DOTALL | re.IGNORECASE)
+        return match.group(1).strip() if match else "No Data"
+
+    # 抓取 Module B 原始文字 (範圍限定到 Step Two 或下一段落前)
+    mod_b_raw = extract(r"Module B[^\n:]*[:：]\s*(.*?)(?=\n\s*\[Step Two\]|\n\s*\[External|$)")
     
-    with col1:
-        st.subheader("➕ 建立新容器 (New Avatar)")
-        
-        a_name = st.text_input("人物代號 (Name)*", placeholder="例如：Alex")
-        col_a, col_g = st.columns(2)
-        with col_a:
-            a_age = st.number_input("年齡", min_value=1, max_value=120, value=33)
-        with col_g:
-            a_gender = st.selectbox("性別", ["男性", "女性", "非二元", "保密"])
-            
-        st.divider()
-        
-        st.markdown("##### 🌱 注入靈魂種子 (特質/設定)")
-        col_seed_in, col_seed_btn = st.columns([7, 3])
-        with col_seed_in:
-            new_seed = st.text_input("輸入單一特質", placeholder="例如：個性機車", key="seed_input_box", label_visibility="collapsed")
-        with col_seed_btn:
-            if st.button("➕ 加入種子", use_container_width=True):
-                if new_seed and new_seed not in st.session_state.temp_seeds:
-                    st.session_state.temp_seeds.append(new_seed)
-                    st.rerun()
-                    
-        if st.session_state.temp_seeds:
-            st.write("**已加入的種子：**")
-            for i, seed in enumerate(st.session_state.temp_seeds):
-                sc1, sc2 = st.columns([8, 2])
-                sc1.info(f"🏷️ {seed}")
-                if sc2.button("❌ 刪除", key=f"del_seed_{i}", use_container_width=True):
-                    st.session_state.temp_seeds.pop(i)
-                    st.rerun()
-            st.divider()
-            core_seed_label = st.selectbox("⭐ 選定核心種子 (僅供 UI 標示)", st.session_state.temp_seeds)
-        else:
-            st.caption("尚未加入任何特質種子。")
-            core_seed_label = "未設定"
-            
-        st.divider()
+    # 🔥 強制清洗：如果 LLM 把圖靈測試的判定偷塞進了 Module B，把它刪掉，只保留純粹的戰略判斷
+    mod_b_clean = re.sub(r"\[?Exclusive System Protocol.*?\]?", "", mod_b_raw, flags=re.IGNORECASE | re.DOTALL)
+    mod_b_clean = re.sub(r"Intrusion Value.*?\n", "", mod_b_clean, flags=re.IGNORECASE)
+    mod_b_clean = re.sub(r"🚨 System Forced Override.*?\n", "", mod_b_clean, flags=re.IGNORECASE)
+    mod_b_clean = mod_b_clean.strip()
 
-        if st.button("🚀 注入靈魂並生成矩陣", type="primary", use_container_width=True):
-            if not api_key or not selected_model:
-                st.error("請先在側邊欄設定 API Key 與模型。")
-            elif not a_name:
-                st.error("請填寫人物代號！")
-            elif a_name in st.session_state.avatars:
-                st.error("此代號已存在，請換一個名字。")
-            else:
-                first_seed = f"{a_age}歲{a_gender}"
-                all_seeds = [first_seed] + st.session_state.temp_seeds
-                
-                with st.spinner("正在編譯核心模塊矩陣 (這可能需要幾十秒)..."):
-                    try:
-                        generated_matrix = engine.generate_avatar_matrix(api_key, selected_model, all_seeds)
-                        st.session_state.avatars[a_name] = {
-                            "name": a_name,
-                            "first_seed": first_seed,
-                            "core_seed_label": core_seed_label,
-                            "seeds": list(st.session_state.temp_seeds),
-                            "matrix": generated_matrix,
-                            "messages": [], 
-                            "scene": "我們現在正在進行一場普通的初次見面談話。",
-                            "user_perception": "一位剛認識的普通陌生人。",
-                            "core_target": "維持基本社交禮儀，完成這次對話。(強度：低)"
-                        }
-                        st.session_state.temp_seeds = []
-                        st.success(f"✅ {a_name} 意識容器建立完成！")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"矩陣生成失敗: {str(e)}")
+    data = {
+        "l_val": extract(r"L=(.*?)(?=\n|\s*/|\s*T=)"),
+        "t_val": extract(r"T=(.*?)(?=\n|\s*/|\s*SAI=)"),
+        "sai": extract(r"SAI=(.*?)(?=\n|\s*/|\s*B-D=)"),
+        "bd": extract(r"B-D=(.*?)(?=\n|\s*/|\s*MF=)"),
+        "mf": extract(r"MF=(.*?)(?=\n|\s*/|\s*ATM=)"),
+        "ai_scan": extract(r"Intrusion Value.*?(\d+)"),
+        "mod_b": mod_b_clean if mod_b_clean else "No Data",
+        "mod_c": extract(r"Module C[^\n:]*[:：]\s*(.*?)(?=\n\s*Module D|$)"),
+        "mod_d": extract(r"Module D[^\n:]*[:：]\s*(.*?)(?=\n\s*\[VFO Harmonized|$)"),
+        "mod_a": extract(r"Module A[^\n:]*[:：]\s*(.*?)(?=\n|-|$)")
+    }
+    return data
 
-    with col2:
-        st.subheader("📂 已存檔與內建容器")
-        
-        if st.button("✨ 載入內建範例人格：唐銘駿", use_container_width=True):
-            if "唐銘駿" not in st.session_state.avatars:
-                st.session_state.avatars["唐銘駿"] = presets.PRESETS["唐銘駿"]
-                st.success("唐銘駿已載入資料庫！")
-                st.rerun()
-            else:
-                st.info("唐銘駿已經在資料庫中了。")
-                
-        st.divider()
-
-        if not st.session_state.avatars:
-            st.info("目前沒有任何人物檔案。請在左側建立或載入內建人格。")
-        else:
-            for name, data in st.session_state.avatars.items():
-                with st.expander(f"👤 {name} ({data['first_seed']} / 核心: {data.get('core_seed_label', '無')})", expanded=True):
-                    st.caption(f"附加種子: {', '.join(data['seeds']) if data['seeds'] else '無'}")
-                    
-                    col_btn1, col_btn2 = st.columns(2)
-                    with col_btn1:
-                        if st.button(f"▶️ 進入模擬", key=f"sim_{name}", type="primary"):
-                            st.session_state.active_avatar_name = name
-                            st.session_state.current_page = "simulation"
-                            st.rerun()
-                    with col_btn2:
-                        with st.popover("🔍 查看靈魂矩陣"):
-                            st.code(data['matrix'], language="markdown")
-
-# ==========================================
-# 4. 頁面 2：核心認知終端 (Simulation Page)
-# ==========================================
-def render_simulation_page():
-    avatar_name = st.session_state.active_avatar_name
-    avatar_data = st.session_state.avatars[avatar_name]
-    core_label = avatar_data.get('core_seed_label', '未設定')
+def process_avatar_turn(api_key, selected_model, system_prompt, history_for_api, forced_template_text):
+    """處理單次對話回合，並將最終對話與內部推演分離"""
+    genai.configure(api_key=api_key)
+    model_inst = genai.GenerativeModel(model_name=selected_model, system_instruction=system_prompt)
     
-    # --- 頂部導航與標題 ---
-    col_nav1, col_nav2, col_nav3 = st.columns([1, 8, 1])
-    with col_nav1:
-        if st.button("⬅️ 返回人物庫"):
-            st.session_state.current_page = "manager"
-            st.rerun()
-    with col_nav2:
-        st.markdown(f"### 🧠 測試對象：**{avatar_name}** | {avatar_data['first_seed']} / 核心: {core_label}")
-    with col_nav3:
-        if st.button("🔄 刷新對話", type="primary"):
-            st.session_state.avatars[avatar_name]["messages"] = []
-            st.rerun()
-
-    # ==========================================
-    # --- 動態環境設定 (移至上方並維持展開) ---
-    # ==========================================
-    with st.expander("⚙️ 動態環境、視角與動機設定 (可隨時修改，下回合生效)", expanded=True):
-        col_s1, col_s2, col_s3 = st.columns(3)
-        with col_s1:
-            new_scene = st.text_area("🎬 當下場景與客觀前提", value=avatar_data['scene'], height=80)
-        with col_s2:
-            new_perception = st.text_area("👁️ Avatar 眼中的你", value=avatar_data.get('user_perception', ''), height=80)
-        with col_s3:
-            new_target = st.text_area("🎯 Avatar 核心目標與強度", value=avatar_data.get('core_target', ''), height=80)
-            
-        if new_scene != avatar_data['scene']: st.session_state.avatars[avatar_name]['scene'] = new_scene
-        if new_perception != avatar_data.get('user_perception'): st.session_state.avatars[avatar_name]['user_perception'] = new_perception
-        if new_target != avatar_data.get('core_target'): st.session_state.avatars[avatar_name]['core_target'] = new_target
-
-    st.divider()
-
-    # ==========================================
-    # --- 生命條儀表板與推演矩陣 ---
-    # ==========================================
-    latest_msg = None
-    if avatar_data["messages"]:
-        for msg in reversed(avatar_data["messages"]):
-            if msg["role"] == "assistant":
-                latest_msg = msg
-                break
-                
-    if latest_msg and latest_msg.get("parsed_dash"):
-        d = latest_msg["parsed_dash"]
-        
-        # 提取 MF 與 AI 防禦值 (放置於最上方作為警示)
-        mf_full = d.get('mf', '20')
-        mf_val = mf_full.split('(')[0].strip()
-        mf_reason = mf_full[len(mf_val):].strip()
-        st.markdown(f"**🎭 面具疲勞度 (MF): {mf_val} / 100** {mf_reason}")
-        
-        ai_scan = d.get("ai_scan", "0")
-        if ai_scan != "0" and ai_scan != "No Data":
-            st.error(f"🛡️ 圖靈測試防禦機制啟動：⚠️ 偵測到 AI 塑膠味！入侵值: {ai_scan}")
-            
-        # 左右分欄：左邊垂直生命條，右邊 2x2 推演文字
-        col_bars, col_details = st.columns([1, 1], gap="large")
-        
-        # 左側：四條垂直堆疊的生命條
-        with col_bars:
-            st.markdown("##### 🧬 核心心理指標")
-            render_health_bar(d.get("l_val", "0"), "L (好感度)", -10, 20, "#00cc96")   # 綠色
-            render_health_bar(d.get("sai", "50"), "SAI (地位感知)", 0, 100, "#ab63fa") # 紫色
-            render_health_bar(d.get("t_val", "0"), "T (信任度)", -10, 20, "#636efa")   # 藍色
-            render_health_bar(d.get("bd", "100"), "B-D (邊界防禦)", 0, 100, "#ef553b") # 紅色
-
-        # 右側：四欄詳細心理推演 (兩欄並排，共兩列)
-        with col_details:
-            st.markdown("##### 🔍 詳細心理推演")
-            
-            d_r1c1, d_r1c2 = st.columns(2)
-            with d_r1c1:
-                st.markdown("**🧠 戰略判斷**")
-                st.info(d.get("mod_b", "無資料"))
-            with d_r1c2:
-                st.markdown("**🌋 真實內在反射**")
-                st.warning(d.get("mod_c", "無資料"))
-                
-            d_r2c1, d_r2c2 = st.columns(2)
-            with d_r2c1:
-                st.markdown("**🎭 職業面具偽裝**")
-                st.success(d.get("mod_d", "無資料"))
-            with d_r2c2:
-                st.markdown("**🎯 次輪準備**")
-                st.write(d.get("mod_a", "無資料"))
-
+    chat = model_inst.start_chat(history=history_for_api)
+    response = chat.send_message(forced_template_text)
+    full_text = response.text
+    
+    clean_text = re.sub(r"^```[a-z]*\n", "", full_text)
+    clean_text = re.sub(r"\n```$", "", clean_text)
+    
+    internal_text = ""
+    output_text = ""
+    
+    parts = clean_text.split("----------------------")
+    if len(parts) >= 2:
+        internal_text = parts[0].strip()
+        raw_out = parts[-1].strip()
+        output_text = re.sub(r"\[Final Reply\]", "", raw_out, flags=re.IGNORECASE).strip()
     else:
-        st.caption("等待首輪對話產生 VFO 數據...")
-
-    st.divider()
-    
-    # ==========================================
-    # --- 聊天區塊 (全寬) ---
-    # ==========================================
-    for msg in avatar_data['messages']:
-        if msg["role"] == "user":
-            with st.chat_message("user"):
-                st.markdown(msg["content"])
+        internal_text = clean_text
+        match = re.search(r'\[Final Reply\](.*?)(\[Stage 0|\Z)', clean_text, re.DOTALL | re.IGNORECASE)
+        if match:
+            output_text = match.group(1).strip()
         else:
-            with st.chat_message("assistant"):
-                st.markdown(msg["content"])
+            output_text = clean_text
 
-    if user_input := st.chat_input(f"對 {avatar_name} 說點什麼..."):
-        if not api_key:
-            st.error("請先配置 API Key。")
-            st.stop()
-            
-        st.session_state.avatars[avatar_name]["messages"].append({"role": "user", "content": user_input})
-        with st.chat_message("user"):
-            st.markdown(user_input)
+    parsed_dash = extract_vfo_dashboard(internal_text)
 
-        with st.chat_message("assistant"):
-            with st.spinner(f'{avatar_name} 運算中...'):
-                try:
-                    history_for_api = []
-                    for m in avatar_data["messages"][:-1]:
-                        if m["role"] == "user":
-                            history_for_api.append({"role": "user", "parts": [m["content"]]})
-                        else:
-                            full_memory = m.get("raw_text", m["content"])
-                            history_for_api.append({"role": "model", "parts": [full_memory]})
-                            
-                    forced_input = cfg.get_forced_template(user_input)
-                    
-                    dynamic_system_prompt = (
-                        avatar_data['matrix'] + "\n\n" + 
-                        cfg.BASE_SYSTEM_RULES + 
-                        f"\n\n【System Absolute Override - 當前動態環境與狀態】\n"
-                        f"🎬 1. 互動場景與前提：\n{avatar_data['scene']}\n\n"
-                        f"👁️ 2. {avatar_name} 眼中的使用者狀態 (外貌/身分/客觀評估)：\n{avatar_data['user_perception']}\n\n"
-                        f"🎯 3. {avatar_name} 當下的核心目標 (Core Target) 與驅動強度：\n{avatar_data['core_target']}\n"
-                        f"(⚠️ VFO 引擎指令：請將上述 Target 強制寫入並覆蓋初始 Core Target，且在 Step 1 戰略判斷中，必須嚴格受此 Target 強度與使用者狀態所驅動。)"
-                    )
-                    
-                    result = engine.process_avatar_turn(
-                        api_key=api_key,
-                        selected_model=selected_model,
-                        system_prompt=dynamic_system_prompt,
-                        history_for_api=history_for_api,
-                        forced_template_text=forced_input
-                    )
-                    
-                    st.markdown(result["output"])
-                    
-                    st.session_state.avatars[avatar_name]["messages"].append({
-                        "role": "assistant",
-                        "raw_text": result["raw_full_text"],     
-                        "content": result["output"],
-                        "parsed_dash": result["parsed_dash"]
-                    })
-                    st.rerun() 
-
-                except Exception as e:
-                    st.error(f"運算中斷：{str(e)}")
-
-# ==========================================
-# 5. 主程式路由執行
-# ==========================================
-if st.session_state.current_page == "manager":
-    render_manager_page()
-elif st.session_state.current_page == "simulation":
-    if st.session_state.active_avatar_name:
-        render_simulation_page()
-    else:
-        st.session_state.current_page = "manager"
-        st.rerun()
+    return {
+        "internal": internal_text,
+        "output": output_text,
+        "raw_full_text": full_text,
+        "parsed_dash": parsed_dash
+    }
