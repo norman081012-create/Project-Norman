@@ -177,4 +177,144 @@ def render_simulation_page():
         with col_s2:
             new_perception = st.text_area("👁️ Avatar 眼中的你 (狀態/外貌/身分)", value=avatar_data.get('user_perception', ''), height=100, help="Avatar 目前認定你是什麼身分？(如：面試官、高壯男性、穿著隨便)")
         with col_s3:
-            new_target = st.text_
+            new_target = st.text_area("🎯 Avatar 初始/核心目標與強度", value=avatar_data.get('core_target', ''), height=100, help="Avatar 當下最想達成的目的是什麼？(如：應徵工作-強需求、敷衍了事-弱需求)")
+            
+        # 即時儲存設定
+        if new_scene != avatar_data['scene']: st.session_state.avatars[avatar_name]['scene'] = new_scene
+        if new_perception != avatar_data.get('user_perception'): st.session_state.avatars[avatar_name]['user_perception'] = new_perception
+        if new_target != avatar_data.get('core_target'): st.session_state.avatars[avatar_name]['core_target'] = new_target
+
+    st.divider()
+
+    # 雙欄主畫面
+    col_chat, col_dash = st.columns([7, 3], gap="large")
+
+    with col_chat:
+        for msg in avatar_data['messages']:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+        if user_input := st.chat_input(f"對 {avatar_name} 說點什麼..."):
+            if not api_key:
+                st.error("請先配置 API Key。")
+                st.stop()
+            
+            st.session_state.avatars[avatar_name]["messages"].append({"role": "user", "content": user_input})
+            with st.chat_message("user"):
+                st.markdown(user_input)
+
+            with st.chat_message("assistant"):
+                with st.spinner(f'{avatar_name} 運算中...'):
+                    try:
+                        history_for_api = []
+                        for m in avatar_data["messages"][:-1]:
+                            if m["role"] == "user":
+                                history_for_api.append({"role": "user", "parts": [m["content"]]})
+                            else:
+                                full_memory = m.get("raw_text", m["content"])
+                                history_for_api.append({"role": "model", "parts": [full_memory]})
+                                
+                        forced_input = cfg.get_forced_template(user_input)
+                        
+                        # ----------------------------------------------------
+                        # 🔥 終極 Prompt 動態拼接 (加入主觀視角與目標)
+                        # ----------------------------------------------------
+                        dynamic_system_prompt = (
+                            avatar_data['matrix'] + "\n\n" + 
+                            cfg.BASE_SYSTEM_RULES + 
+                            f"\n\n【System Absolute Override - 當前動態環境與狀態】\n"
+                            f"🎬 1. 互動場景與前提：\n{avatar_data['scene']}\n\n"
+                            f"👁️ 2. {avatar_name} 眼中的使用者狀態 (外貌/身分/客觀評估)：\n{avatar_data['user_perception']}\n\n"
+                            f"🎯 3. {avatar_name} 當下的核心目標 (Core Target) 與驅動強度：\n{avatar_data['core_target']}\n"
+                            f"(⚠️ VFO 引擎指令：請將上述 Target 強制寫入並覆蓋初始 Core Target，且在 Step 1 戰略判斷中，必須嚴格受此 Target 強度與使用者狀態所驅動。)"
+                        )
+                        
+                        result = engine.process_avatar_turn(
+                            api_key=api_key,
+                            selected_model=selected_model,
+                            system_prompt=dynamic_system_prompt,
+                            history_for_api=history_for_api,
+                            forced_template_text=forced_input
+                        )
+                        
+                        st.markdown(result["output"])
+                        
+                        st.session_state.avatars[avatar_name]["messages"].append({
+                            "role": "assistant",
+                            "raw_text": result["raw_full_text"],     
+                            "content": result["output"],
+                            "parsed_dash": result["parsed_dash"]
+                        })
+                        st.rerun() 
+
+                    except Exception as e:
+                        st.error(f"運算中斷：{str(e)}")
+
+    with col_dash:
+        st.subheader(f"📊 {avatar_name} 監測板")
+        st.markdown("*(擷取自最新一輪神經運算)*")
+        st.divider()
+        
+        latest_msg = None
+        for msg in reversed(avatar_data["messages"]):
+            if msg["role"] == "assistant":
+                latest_msg = msg
+                break
+                
+        if latest_msg and latest_msg.get("parsed_dash"):
+            d = latest_msg["parsed_dash"]
+            
+            mf_val = d.get('mf', '20').split('(')[0].strip()
+            st.markdown(f"**🎭 面具疲勞度 (MF): {mf_val} / 100**")
+            try:
+                clean_mf = int(float(re.search(r'\d+', mf_val).group()))
+                st.progress(min(clean_mf, 100))
+            except:
+                pass
+            
+            st.markdown("**🛡️ 圖靈測試防禦機制**")
+            if d.get("ai_scan", "0") != "0" and d.get("ai_scan") != "No Data":
+                st.error(f"⚠️ 偵測到 AI 塑膠味！入侵值: {d.get('ai_scan')}")
+            else:
+                st.success("安全 (未觸發物理打斷)")
+                
+            st.divider()
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("L (好感度)", d.get("l_val", "0").split('(')[0].strip())
+                st.metric("SAI (地位感知)", d.get("sai", "50").split('(')[0].strip())
+            with col2:
+                st.metric("T (信任度)", d.get("t_val", "0").split('(')[0].strip())
+                st.metric("B-D (邊界防禦)", d.get("bd", "100").split('(')[0].strip())
+                
+            st.markdown("**🧠 模組 B: 戰略判斷 (Introspection)**")
+            st.info(d.get("mod_b", "無資料"))
+            
+            st.markdown("**🌋 模組 C: 真實內在反射 (True Inner Reflex)**")
+            st.warning(d.get("mod_c", "無資料"))
+            
+            st.markdown("**🎭 模組 D: 職業面具偽裝 (Professional Mask)**")
+            st.success(d.get("mod_d", "無資料"))
+            
+            st.markdown("**🎯 模組 A: 次輪準備 (Next Round Prep)**")
+            st.write(d.get("mod_a", "無資料"))
+            
+            st.divider()
+            st.caption("⚙️ 開發者底層監控")
+            with st.expander("🔍 展開 VFO 原始推演 Log (Raw Data)", expanded=False):
+                st.code(latest_msg.get("raw_text", "無資料"), language="markdown")
+        else:
+            st.caption("等待首輪對話產生 VFO 數據...")
+
+# ==========================================
+# 5. 主程式路由執行
+# ==========================================
+if st.session_state.current_page == "manager":
+    render_manager_page()
+elif st.session_state.current_page == "simulation":
+    if st.session_state.active_avatar_name:
+        render_simulation_page()
+    else:
+        st.session_state.current_page = "manager"
+        st.rerun()
